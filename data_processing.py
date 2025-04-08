@@ -1,80 +1,73 @@
 # data_processing.py
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-import numpy as np
 from torchvision import transforms
 
 class MultiLabelDataset(Dataset):
     def __init__(self, data, transform=None):
-        """
-        Args:
-            data: numpy array of shape (no_images, lis) where lis is (img, labels)
-            transform: Optional transform to be applied on images
-        """
-        self.data = data
+        self.images = data['images']
+        self.labels = data['labels']
         self.transform = transform
-        
-    def __len__(self):
-        return len(self.data)
-    
-    def __getitem__(self, idx):
-        img, labels = self.data[idx]
-        
-        # Convert numpy array to torch tensor
-        img = torch.from_numpy(img).float()
-        # Convert from (H,W,C) to (C,H,W) format
-        img = img.permute(2, 0, 1)
-        
-        # Convert labels to tensor
-        labels = torch.from_numpy(labels).float()
-        
-        if self.transform:
-            img = self.transform(img)
-            
-        return img, labels
 
-def get_data_loaders(data_path, batch_size=32, train_ratio=0.8):
-    """Create train and validation data loaders"""
-    # Load the numpy array data
-    data = np.load(data_path, allow_pickle=True)
-    
-    # Split into train and validation sets
-    num_samples = len(data)
-    indices = np.random.permutation(num_samples)
-    split_idx = int(train_ratio * num_samples)
-    train_indices = indices[:split_idx]
-    val_indices = indices[split_idx:]
-    
-    # Define transformations
-    train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx].astype(np.float32) / 2.0  # Normalize to 0–1
+        label = self.labels[idx]
+
+        # Convert (H, W) → (1, H, W) → (3, H, W)
+        image = np.expand_dims(image, axis=0)
+        image = np.repeat(image, 3, axis=0)  # Make 3 channels
+
+        # Convert to tensor
+        image = torch.from_numpy(image)
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, torch.tensor(label, dtype=torch.float32)
+
+def get_data_loaders(data_path, batch_size=32, val_split=0.2):
+    npz_data = np.load(data_path)
+
+    # Get keys and values from npz
+    if isinstance(npz_data, np.lib.npyio.NpzFile):
+        keys = list(npz_data.keys())
+        images = npz_data[keys[0]]
+        labels = npz_data[keys[1]]
+    else:
+        raise ValueError("Loaded data is not a valid .npz file")
+
+    data = {
+        'images': images,
+        'labels': labels
+    }
+
+    indices = np.arange(len(images))
+    np.random.shuffle(indices)
+    split = int(len(indices) * (1 - val_split))
+    train_indices = indices[:split]
+    val_indices = indices[split:]
+
+    # Transforms (ViT expects 224x224 and normalized RGB)
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.Normalize((0.5,), (0.5,))  # Already 3-channel by this point
     ])
-    
-    val_transform = transforms.Compose([
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    
-    # Create datasets
-    train_dataset = MultiLabelDataset(data[train_indices], transform=train_transform)
-    val_dataset = MultiLabelDataset(data[val_indices], transform=val_transform)
-    
-    # Create data loaders optimized for Apple Silicon
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        num_workers=2,  # Optimized for Mac
-        pin_memory=True
-    )
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=2,
-        pin_memory=True
-    )
-    
+
+    train_dataset = MultiLabelDataset({
+        'images': images[train_indices],
+        'labels': labels[train_indices]
+    }, transform=transform)
+
+    val_dataset = MultiLabelDataset({
+        'images': images[val_indices],
+        'labels': labels[val_indices]
+    }, transform=transform)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
     return train_loader, val_loader
