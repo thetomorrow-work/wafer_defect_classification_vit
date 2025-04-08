@@ -6,6 +6,7 @@ print(f"Using device: {DEVICE}")
 
 # Training parameters
 CONFIG = {
+    'data_path': r"C:\Users\nithi\Downloads\archive (4)\Wafer_Map_Datasets.npz",
     'batch_size': 64,
     'num_epochs': 50,
     'learning_rate': 1e-4,
