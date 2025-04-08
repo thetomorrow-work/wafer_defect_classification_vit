@@ -111,7 +111,8 @@ def train_model(model, train_loader, val_loader, device, config):
         
         # Calculate F1 score
         from sklearn.metrics import f1_score
-        f1 = f1_score(all_labels, all_preds, average='samples')
+        f1 = f1_score(all_labels, all_preds, average='samples', zero_division=1)
+
         
         history['val_loss'].append(avg_val_loss)
         history['val_f1'].append(f1)
